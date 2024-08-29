@@ -58,6 +58,7 @@ func Test_listenHTTPUpgradeAndDial(t *testing.T) {
 	}
 
 	common.Must(conn.Close())
+	<-time.After(time.Second * 5)
 	conn, err = Dial(ctx, net.TCPDestination(net.DomainAddress("localhost"), listenPort), streamSettings)
 	common.Must(err)
 	_, err = conn.Write([]byte("Test connection 2"))
@@ -117,6 +118,7 @@ func Test_listenHTTPUpgradeAndDialWithHeaders(t *testing.T) {
 	}
 
 	common.Must(conn.Close())
+	<-time.After(time.Second * 5)
 	conn, err = Dial(ctx, net.TCPDestination(net.DomainAddress("localhost"), listenPort), streamSettings)
 	common.Must(err)
 	_, err = conn.Write([]byte("Test connection 2"))
@@ -149,7 +151,7 @@ func TestDialWithRemoteAddr(t *testing.T) {
 				return
 			}
 
-			_, err = c.Write([]byte(c.RemoteAddr().String()))
+			_, err = c.Write([]byte("Response"))
 			common.Must(err)
 		}(conn)
 	})
@@ -167,7 +169,7 @@ func TestDialWithRemoteAddr(t *testing.T) {
 	var b [1024]byte
 	n, err := conn.Read(b[:])
 	common.Must(err)
-	if string(b[:n]) != "1.1.1.1:0" {
+	if string(b[:n]) != "Response" {
 		t.Error("response: ", string(b[:n]))
 	}
 

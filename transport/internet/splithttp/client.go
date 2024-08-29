@@ -32,7 +32,6 @@ type DefaultDialerClient struct {
 	download        *http.Client
 	upload          *http.Client
 	isH2            bool
-	isH3            bool
 	// pool of net.Conn, created using dialUploadConn
 	uploadRawPool  *sync.Pool
 	dialUploadConn func(ctxInner context.Context) (net.Conn, error)
@@ -49,8 +48,6 @@ func (c *DefaultDialerClient) OpenDownload(ctx context.Context, baseURL string) 
 	var downResponse io.ReadCloser
 	gotDownResponse := done.New()
 
-	ctx, ctxCancel := context.WithCancel(ctx)
-
 	go func() {
 		trace := &httptrace.ClientTrace{
 			GotConn: func(connInfo httptrace.GotConnInfo) {
@@ -63,10 +60,8 @@ func (c *DefaultDialerClient) OpenDownload(ctx context.Context, baseURL string) 
 		// in case we hit an error, we want to unblock this part
 		defer gotConn.Close()
 
-		ctx = httptrace.WithClientTrace(ctx, trace)
-
 		req, err := http.NewRequestWithContext(
-			ctx,
+			httptrace.WithClientTrace(ctx, trace),
 			"GET",
 			baseURL,
 			nil,
@@ -98,17 +93,12 @@ func (c *DefaultDialerClient) OpenDownload(ctx context.Context, baseURL string) 
 		gotDownResponse.Close()
 	}()
 
-	if !c.isH3 {
-		// in quic-go, sometimes gotConn is never closed for the lifetime of
-		// the entire connection, and the download locks up
-		// https://github.com/quic-go/quic-go/issues/3342
-		// for other HTTP versions, we want to block Dial until we know the
-		// remote address of the server, for logging purposes
-		<-gotConn.Wait()
-	}
+	// we want to block Dial until we know the remote address of the server,
+	// for logging purposes
+	<-gotConn.Wait()
 
 	lazyDownload := &LazyReader{
-		CreateReader: func() (io.Reader, error) {
+		CreateReader: func() (io.ReadCloser, error) {
 			<-gotDownResponse.Wait()
 			if downResponse == nil {
 				return nil, errors.New("downResponse failed")
@@ -117,26 +107,18 @@ func (c *DefaultDialerClient) OpenDownload(ctx context.Context, baseURL string) 
 		},
 	}
 
-	// workaround for https://github.com/quic-go/quic-go/issues/2143 --
-	// always cancel request context so that Close cancels any Read.
-	// Should then match the behavior of http2 and http1.
-	reader := downloadBody{
-		lazyDownload,
-		ctxCancel,
-	}
-
-	return reader, remoteAddr, localAddr, nil
+	return lazyDownload, remoteAddr, localAddr, nil
 }
 
 func (c *DefaultDialerClient) SendUploadRequest(ctx context.Context, url string, payload io.ReadWriteCloser, contentLength int64) error {
 	req, err := http.NewRequest("POST", url, payload)
+	req.ContentLength = contentLength
 	if err != nil {
 		return err
 	}
-	req.ContentLength = contentLength
 	req.Header = c.transportConfig.GetRequestHeader()
 
-	if c.isH2 || c.isH3 {
+	if c.isH2 {
 		resp, err := c.upload.Do(req)
 		if err != nil {
 			return err
@@ -183,15 +165,5 @@ func (c *DefaultDialerClient) SendUploadRequest(ctx context.Context, url string,
 		c.uploadRawPool.Put(uploadConn)
 	}
 
-	return nil
-}
-
-type downloadBody struct {
-	io.Reader
-	cancel context.CancelFunc
-}
-
-func (c downloadBody) Close() error {
-	c.cancel()
 	return nil
 }

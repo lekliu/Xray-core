@@ -111,7 +111,7 @@ func canLookupIP(ctx context.Context, dst net.Destination, sockopt *SocketConfig
 }
 
 func redirect(ctx context.Context, dst net.Destination, obt string) net.Conn {
-	errors.LogInfo(ctx, "redirecting request "+dst.String()+" to "+obt)
+	errors.LogInfo(ctx, "redirecting request " + dst.String() + " to " + obt)
 	h := obm.GetHandler(obt)
 	outbounds := session.OutboundsFromContext(ctx)
 	ctx = session.ContextWithOutbounds(ctx, append(outbounds, &session.Outbound{
@@ -123,16 +123,10 @@ func redirect(ctx context.Context, dst net.Destination, obt string) net.Conn {
 		ur, uw := pipe.New(pipe.OptionsFromContext(ctx)...)
 		dr, dw := pipe.New(pipe.OptionsFromContext(ctx)...)
 
-		go h.Dispatch(context.WithoutCancel(ctx), &transport.Link{Reader: ur, Writer: dw})
-		var readerOpt cnc.ConnectionOption
-		if dst.Network == net.Network_TCP {
-			readerOpt = cnc.ConnectionOutputMulti(dr)
-		} else {
-			readerOpt = cnc.ConnectionOutputMultiUDP(dr)
-		}
+		go h.Dispatch(ctx, &transport.Link{Reader: ur, Writer: dw})
 		nc := cnc.NewConnection(
 			cnc.ConnectionInputMulti(uw),
-			readerOpt,
+			cnc.ConnectionOutputMulti(dr),
 			cnc.ConnectionOnClose(common.ChainedClosable{uw, dw}),
 		)
 		return nc
@@ -156,7 +150,7 @@ func DialSystem(ctx context.Context, dest net.Destination, sockopt *SocketConfig
 		ips, err := lookupIP(dest.Address.String(), sockopt.DomainStrategy, src)
 		if err == nil && len(ips) > 0 {
 			dest.Address = net.IPAddress(ips[dice.Roll(len(ips))])
-			errors.LogInfo(ctx, "replace destination with "+dest.String())
+			errors.LogInfo(ctx, "replace destination with " + dest.String())
 		} else if err != nil {
 			errors.LogWarningInner(ctx, err, "failed to resolve ip")
 		}

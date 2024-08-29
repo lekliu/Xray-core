@@ -6,7 +6,6 @@ package splithttp
 import (
 	"container/heap"
 	"io"
-	"sync"
 
 	"github.com/xtls/xray-core/common/errors"
 )
@@ -17,12 +16,11 @@ type Packet struct {
 }
 
 type uploadQueue struct {
-	pushedPackets   chan Packet
-	writeCloseMutex sync.Mutex
-	heap            uploadHeap
-	nextSeq         uint64
-	closed          bool
-	maxPackets      int
+	pushedPackets chan Packet
+	heap          uploadHeap
+	nextSeq       uint64
+	closed        bool
+	maxPackets    int
 }
 
 func NewUploadQueue(maxPackets int) *uploadQueue {
@@ -36,9 +34,6 @@ func NewUploadQueue(maxPackets int) *uploadQueue {
 }
 
 func (h *uploadQueue) Push(p Packet) error {
-	h.writeCloseMutex.Lock()
-	defer h.writeCloseMutex.Unlock()
-
 	if h.closed {
 		return errors.New("splithttp packet queue closed")
 	}
@@ -48,13 +43,8 @@ func (h *uploadQueue) Push(p Packet) error {
 }
 
 func (h *uploadQueue) Close() error {
-	h.writeCloseMutex.Lock()
-	defer h.writeCloseMutex.Unlock()
-
-	if !h.closed {
-		h.closed = true
-		close(h.pushedPackets)
-	}
+	h.closed = true
+	close(h.pushedPackets)
 	return nil
 }
 

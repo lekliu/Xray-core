@@ -149,6 +149,10 @@ func Generate(parent *Certificate, opts ...Option) (*Certificate, error) {
 		BasicConstraintsValid: true,
 	}
 
+	for _, opt := range opts {
+		opt(template)
+	}
+
 	parentCert := template
 	if parent != nil {
 		pCert, err := x509.ParseCertificate(parent.Certificate)
@@ -156,17 +160,6 @@ func Generate(parent *Certificate, opts ...Option) (*Certificate, error) {
 			return nil, errors.New("failed to parse parent certificate").Base(err)
 		}
 		parentCert = pCert
-	}
-
-	if parentCert.NotAfter.Before(template.NotAfter) {
-		template.NotAfter = parentCert.NotAfter
-	}
-	if parentCert.NotBefore.After(template.NotBefore) {
-		template.NotBefore = parentCert.NotBefore
-	}
-
-	for _, opt := range opts {
-		opt(template)
 	}
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, template, parentCert, publicKey(selfKey), parentKey)
