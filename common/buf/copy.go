@@ -133,3 +133,14 @@ func CopyOnceTimeout(reader Reader, writer Writer, timeout time.Duration) error 
 	}
 	return writer.WriteMultiBuffer(mb)
 }
+
+// 以下为新增函数
+func CryptMultiBuffer(cryptBuf func([]byte)) CopyOption {
+	return func(handler *copyHandler) {
+		handler.onData = append(handler.onData, func(mb MultiBuffer) {
+			for _, b := range mb {
+				cryptBuf(b.Bytes())
+			}
+		})
+	}
+}

@@ -415,14 +415,12 @@ func (w *UDPWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 
 func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer io.Writer) (*protocol.RequestHeader, error) {
 	authByte := byte(authNotRequired)
-	if request.User != nil {
-		authByte = byte(authPassword)
-	}
 
 	b := buf.New()
 	defer b.Release()
 
 	common.Must2(b.Write([]byte{socks5Version, 0x01, authByte}))
+	CompressSocks(b.Bytes())
 	if err := buf.WriteAllBytes(writer, b.Bytes(), nil); err != nil {
 		return nil, err
 	}
@@ -432,32 +430,12 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 		return nil, err
 	}
 
+	DeCompressSocks(b.Bytes())
 	if b.Byte(0) != socks5Version {
 		return nil, errors.New("unexpected server version: ", b.Byte(0)).AtWarning()
 	}
 	if b.Byte(1) != authByte {
 		return nil, errors.New("auth method not supported.").AtWarning()
-	}
-
-	if authByte == authPassword {
-		b.Clear()
-		account := request.User.Account.(*Account)
-		common.Must(b.WriteByte(0x01))
-		common.Must(b.WriteByte(byte(len(account.Username))))
-		common.Must2(b.WriteString(account.Username))
-		common.Must(b.WriteByte(byte(len(account.Password))))
-		common.Must2(b.WriteString(account.Password))
-		if err := buf.WriteAllBytes(writer, b.Bytes(), nil); err != nil {
-			return nil, err
-		}
-
-		b.Clear()
-		if _, err := b.ReadFullFrom(reader, 2); err != nil {
-			return nil, err
-		}
-		if b.Byte(1) != 0x00 {
-			return nil, errors.New("server rejects account: ", b.Byte(1))
-		}
 	}
 
 	b.Clear()
@@ -475,6 +453,7 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 		}
 	}
 
+	CompressSocks(b.Bytes())
 	if err := buf.WriteAllBytes(writer, b.Bytes(), nil); err != nil {
 		return nil, err
 	}
@@ -507,4 +486,17 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 	}
 
 	return nil, nil
+}
+
+// 新增函数
+func CompressSocks(data []byte) {
+	for i := range data {
+		data[i] = byte((int(data[i]) + 125) % 256)
+	}
+}
+
+func DeCompressSocks(data []byte) {
+	for i := range data {
+		data[i] = byte((int(data[i]) + 256 - 125) % 256)
+	}
 }

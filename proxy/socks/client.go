@@ -174,11 +174,13 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	if request.Command == protocol.RequestCommandTCP {
 		requestFunc = func() error {
 			defer timer.SetTimeout(p.Timeouts.DownlinkOnly)
+			//return buf.Copy(link.Reader, buf.NewWriter(conn), buf.UpdateActivity(timer), buf.CryptMultiBuffer(CompressSocks))
 			return buf.Copy(link.Reader, buf.NewWriter(conn), buf.UpdateActivity(timer))
 		}
 		responseFunc = func() error {
 			defer timer.SetTimeout(p.Timeouts.UplinkOnly)
 			return buf.Copy(buf.NewReader(conn), link.Writer, buf.UpdateActivity(timer))
+			//return buf.Copy(buf.NewReader(conn), link.Writer, buf.UpdateActivity(timer), buf.CryptMultiBuffer(DeCompressSocks))
 		}
 	} else if request.Command == protocol.RequestCommandUDP {
 		udpConn, err := dialer.Dial(ctx, udpRequest.Destination())
