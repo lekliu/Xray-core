@@ -1,8 +1,10 @@
 package socks
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
+	"strconv"
 
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/buf"
@@ -74,7 +76,7 @@ func (s *ServerSession) handshake4(cmd byte, reader io.Reader, writer io.Writer)
 		if err != nil {
 			return nil, errors.New("failed to read domain for socks 4a").Base(err)
 		}
-		address = net.DomainAddress(domain)
+		address = net.ParseAddress(domain)
 	}
 
 	switch cmd {
@@ -413,29 +415,34 @@ func (w *UDPWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 	return nil
 }
 
-func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer io.Writer) (*protocol.RequestHeader, error) {
+func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer io.Writer) (*protocol.RequestHeader, error, int) {
 	authByte := byte(authNotRequired)
+	crypt, err2 := strconv.Atoi(request.User.Account.(*Account).Username)
+	if err2 != nil {
+		crypt = 125
+	}
 
 	b := buf.New()
 	defer b.Release()
 
 	common.Must2(b.Write([]byte{socks5Version, 0x01, authByte}))
-	CompressSocks(b.Bytes())
+	CompressSocks(b.Bytes(), crypt) // send 1
 	if err := buf.WriteAllBytes(writer, b.Bytes(), nil); err != nil {
-		return nil, err
+		return nil, err, 0
 	}
 
 	b.Clear()
 	if _, err := b.ReadFullFrom(reader, 2); err != nil {
-		return nil, err
+		return nil, err, 0
 	}
 
-	DeCompressSocks(b.Bytes())
+	DeCompressSocks(b.Bytes(), crypt) // recv 2
+
 	if b.Byte(0) != socks5Version {
-		return nil, errors.New("unexpected server version: ", b.Byte(0)).AtWarning()
+		return nil, errors.New("unexpected server version: ", b.Byte(0)).AtWarning(), 0
 	}
 	if b.Byte(1) != authByte {
-		return nil, errors.New("auth method not supported.").AtWarning()
+		return nil, errors.New("auth method not supported.").AtWarning(), 0
 	}
 
 	b.Clear()
@@ -449,30 +456,37 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 		common.Must2(b.Write([]byte{1, 0, 0, 0, 0, 0, 0 /* RFC 1928 */}))
 	} else {
 		if err := addrParser.WriteAddressPort(b, request.Address, request.Port); err != nil {
-			return nil, err
+			return nil, err, 0
 		}
 	}
 
-	CompressSocks(b.Bytes())
+	CompressSocks(b.Bytes(), crypt) //send 3
 	if err := buf.WriteAllBytes(writer, b.Bytes(), nil); err != nil {
-		return nil, err
+		return nil, err, 0
 	}
 
 	b.Clear()
 	if _, err := b.ReadFullFrom(reader, 3); err != nil {
-		return nil, err
+		return nil, err, 0
 	}
+	DeCompressSocks(b.Bytes(), crypt) // recv 4.1
 
 	resp := b.Byte(1)
 	if resp != 0x00 {
-		return nil, errors.New("server rejects request: ", resp)
+		return nil, errors.New("server rejects request: ", resp), 0
 	}
 
 	b.Clear()
+	if _, err := b.ReadFullFrom(reader, 7); err != nil {
+		return nil, err, 0
+	}
+	DeCompressSocks(b.Bytes(), crypt) // recv 4.2
 
-	address, port, err := addrParser.ReadAddressPort(b, reader)
+	readerAddr := bytes.NewReader(b.Bytes())
+
+	address, port, err := addrParser.ReadAddressPort(b, readerAddr)
 	if err != nil {
-		return nil, err
+		return nil, err, 0
 	}
 
 	if request.Command == protocol.RequestCommandUDP {
@@ -482,21 +496,21 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 			Address: address,
 			Port:    port,
 		}
-		return udpRequest, nil
+		return udpRequest, nil, 0
 	}
 
-	return nil, nil
+	return nil, nil, crypt
 }
 
 // 新增函数
-func CompressSocks(data []byte) {
+func CompressSocks(data []byte, crypt int) {
 	for i := range data {
-		data[i] = byte((int(data[i]) + 125) % 256)
+		data[i] = byte((int(data[i]) + crypt) % 256)
 	}
 }
 
-func DeCompressSocks(data []byte) {
+func DeCompressSocks(data []byte, crypt int) {
 	for i := range data {
-		data[i] = byte((int(data[i]) + 256 - 125) % 256)
+		data[i] = byte((int(data[i]) + 256 - crypt) % 256)
 	}
 }
