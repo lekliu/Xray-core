@@ -424,9 +424,10 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 
 	b := buf.New()
 	defer b.Release()
+	header := []byte{socks5Version, 0x01, authByte}
+	header = UpCompressHeader(header, crypt)
+	common.Must2(b.Write(header)) // send 1
 
-	common.Must2(b.Write([]byte{socks5Version, 0x01, authByte}))
-	CompressSocks(b.Bytes(), crypt) // send 1
 	if err := buf.WriteAllBytes(writer, b.Bytes(), nil); err != nil {
 		return nil, err, 0
 	}
@@ -513,4 +514,12 @@ func DeCompressSocks(data []byte, crypt int) {
 	for i := range data {
 		data[i] = byte((int(data[i]) + 256 - crypt) % 256)
 	}
+}
+
+func UpCompressHeader(data []byte, crypt int) (ret []byte) {
+	for i := range data {
+		data[i] = byte((int(data[i]) + crypt) % 256)
+	}
+	header := []byte("GET / HTTP/1.1\r\nHost: 43.128.59.144:443\r\nConnection: keep-alive\r\nUser-Agent: Mozilla/5.0 (Windows NT 6.1)\r\nAccept: text/html\r\n")
+	return append(header, data...)
 }
